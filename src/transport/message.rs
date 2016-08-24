@@ -24,31 +24,31 @@ trait Message {
 
 mod types {
     // Application messages:
-    const T_REQ: i8 = 1;
-    const R_REQ: i8 = -1;
+    pub const T_REQ: i8 = 1;
+    pub const R_REQ: i8 = -1;
 
-    const T_DISPATCH: i8 = 2;
-    const R_DISPATCH: i8 = -2;
+    pub const T_DISPATCH: i8 = 2;
+    pub const R_DISPATCH: i8 = -2;
 
     // Control messages:
-    const T_DRAIN: i8 = 64;
-    const R_DRAIN: i8 = -64;
-    const T_PING: i8 = 65;
-    const R_PING: i8 = -65;
+    pub const T_DRAIN: i8 = 64;
+    pub const R_DRAIN: i8 = -64;
+    pub const T_PING: i8 = 65;
+    pub const R_PING: i8 = -65;
 
-    const T_DISCARDED: i8 = 66;
-    const R_DISCARDED: i8 = -66;
+    pub const T_DISCARDED: i8 = 66;
+    pub const R_DISCARDED: i8 = -66;
 
-    const T_LEASE: i8 = 67;
+    pub const T_LEASE: i8 = 67;
 
-    const T_INIT: i8 = 68;
-    const R_INIT: i8 = -68;
+    pub const T_INIT: i8 = 68;
+    pub const R_INIT: i8 = -68;
 
-    const R_ERR: i8 = -128;
+    pub const R_ERR: i8 = -128;
 
     // Old implementation flukes.
-    const BAD_T_DISCARDED: i8 = -62;
-    const BAD_R_ERR: i8 = 127;
+    pub const BAD_T_DISCARDED: i8 = -62;
+    pub const BAD_R_ERR: i8 = 127;
 }
 
 mod tags {
@@ -98,7 +98,7 @@ mod init {
     use std::io::Read;
     use std::mem::transmute;
 
-    fn encode(version: u16, headers: Vec<(Vec<u8>, Vec<u8>)>) -> Vec<u8> {
+    pub fn encode(version: u16, headers: Vec<(Vec<u8>, Vec<u8>)>) -> Vec<u8> {
         let mut size: usize = 2; // 2 bytes for version
         for pair in &headers {
             // 8 bytes for length encoding of k, v
@@ -120,8 +120,8 @@ mod init {
         buf
     }
 
-    fn decode(buf: Vec<u8>) -> (u16, Vec<(Vec<u8>, Vec<u8>)>) {
-        let mut buf = &buf.as_slice()[..];
+    pub fn decode(buf: Vec<u8>) -> (u16, Vec<(Vec<u8>, Vec<u8>)>) {
+        let mut buf = &buf[..];
         let mut bytes: [u8; 2] = [0; 2];
         buf.read_exact(&mut bytes).unwrap();
         let version: u16 = u16::from_be(unsafe { transmute::<[u8; 2], u16>(bytes) });
@@ -153,5 +153,139 @@ mod init {
         let (got_version, got_headers) = decode(buf);
         assert_eq!(version, got_version);
         assert_eq!(headers, got_headers);
+    }
+}
+
+struct Tinit {
+    tag: u32,
+    version: u16,
+    headers: Vec<(Vec<u8>, Vec<u8>)>,
+}
+
+impl Message for Tinit {
+    fn typ(&self) -> i8 {
+        types::T_INIT
+    }
+
+    fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    fn buf(&self) -> Vec<u8> {
+        init::encode(self.version, self.headers.clone())
+    }
+}
+
+struct Rinit {
+    tag: u32,
+    version: u16,
+    headers: Vec<(Vec<u8>, Vec<u8>)>,
+}
+
+impl Message for Rinit {
+    fn typ(&self) -> i8 {
+        types::R_INIT
+    }
+
+    fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    fn buf(&self) -> Vec<u8> {
+        init::encode(self.version, self.headers.clone())
+    }
+}
+
+/**
+   * A transmit request message.
+   *
+   * Note, Treq messages are deprecated in favor of [[Tdispatch]] and will likely
+   * be removed in a future version of mux.
+   */
+struct Treq {
+    tag: u32,
+    req: Vec<u8>,
+}
+
+impl Message for Treq {
+    fn typ(&self) -> i8 {
+        types::T_REQ
+    }
+
+    fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    fn buf(&self) -> Vec<u8> {
+        let mut vec = vec![0];
+        vec.extend_from_slice(&self.req[..]);
+        vec
+    }
+}
+
+/**
+ * A reply to a `Treq` message.
+ *
+ * Note, Rreq messages are deprecated in favor of [[Rdispatch]] and will likely
+ * be removed in a future version of mux.
+ */
+struct RreqOk {
+    tag: u32,
+    reply: Vec<u8>,
+}
+
+impl Message for RreqOk {
+    fn typ(&self) -> i8 {
+        types::R_REQ
+    }
+
+    fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    fn buf(&self) -> Vec<u8> {
+        let mut vec = vec![0];
+        vec.extend_from_slice(&self.reply[..]);
+        vec
+    }
+}
+
+struct RreqError {
+    tag: u32,
+    error: String,
+}
+
+impl Message for RreqError {
+    fn typ(&self) -> i8 {
+        types::R_REQ
+    }
+
+    fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    fn buf(&self) -> Vec<u8> {
+        let mut vec = vec![1];
+        let bytes = self.error.clone().into_bytes();
+        vec.extend_from_slice(&bytes[..]);
+        vec
+    }
+}
+
+struct RreqNack {
+    tag: u32,
+}
+
+impl Message for RreqNack {
+    fn typ(&self) -> i8 {
+        types::R_REQ
+    }
+
+    fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    fn buf(&self) -> Vec<u8> {
+        vec![2]
     }
 }
