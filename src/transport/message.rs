@@ -328,3 +328,179 @@ impl Message for Tdispatch {
         buf
     }
 }
+
+struct RdispatchOk {
+    tag: u32,
+    contexts: Vec<(Vec<u8>, Vec<u8>)>,
+    reply: Vec<u8>,
+}
+
+impl Message for RdispatchOk {
+    fn typ(&self) -> i8 {
+        types::R_DISPATCH
+    }
+
+    fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    fn buf(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.push(0u8);
+        buf.write_u16::<BigEndian>(self.contexts.len() as u16).unwrap();
+        for pair in &self.contexts {
+            let k = &pair.0;
+            let v = &pair.1;
+            buf.write_u16::<BigEndian>(k.len() as u16).unwrap();
+            buf.extend_from_slice(&k);
+            buf.write_u16::<BigEndian>(v.len() as u16).unwrap();
+            buf.extend_from_slice(&v);
+        }
+        buf.extend_from_slice(&self.reply[..]);
+        buf
+    }
+}
+
+struct RdispatchError {
+    tag: u32,
+    contexts: Vec<(Vec<u8>, Vec<u8>)>,
+    error: String,
+}
+
+impl Message for RdispatchError {
+    fn typ(&self) -> i8 {
+        types::R_DISPATCH
+    }
+
+    fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    fn buf(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.push(1u8);
+        buf.write_u16::<BigEndian>(self.contexts.len() as u16).unwrap();
+        for pair in &self.contexts {
+            let k = &pair.0;
+            let v = &pair.1;
+            buf.write_u16::<BigEndian>(k.len() as u16).unwrap();
+            buf.extend_from_slice(&k);
+            buf.write_u16::<BigEndian>(v.len() as u16).unwrap();
+            buf.extend_from_slice(&v);
+        }
+        let bytes = self.error.clone().into_bytes();
+        buf.extend_from_slice(&bytes[..]);
+        buf
+    }
+}
+
+struct RdispatchNack {
+    tag: u32,
+    contexts: Vec<(Vec<u8>, Vec<u8>)>,
+}
+
+impl Message for RdispatchNack {
+    fn typ(&self) -> i8 {
+        types::R_DISPATCH
+    }
+
+    fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    fn buf(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.push(2u8);
+        buf.write_u16::<BigEndian>(self.contexts.len() as u16).unwrap();
+        for pair in &self.contexts {
+            let k = &pair.0;
+            let v = &pair.1;
+            buf.write_u16::<BigEndian>(k.len() as u16).unwrap();
+            buf.extend_from_slice(&k);
+            buf.write_u16::<BigEndian>(v.len() as u16).unwrap();
+            buf.extend_from_slice(&v);
+        }
+        buf
+    }
+}
+
+/**
+ * A fragment, as defined by the mux spec, is a message with its tag MSB
+ * set to 1.
+ */
+struct Fragment {
+    typ: i8,
+    tag: u32,
+    buf: Vec<u8>,
+}
+
+impl Message for Fragment {
+    fn typ(&self) -> i8 {
+        self.typ
+    }
+
+    fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    fn buf(&self) -> Vec<u8> {
+        self.buf.clone()
+    }
+}
+
+/** Indicates to the client to stop sending new requests. */
+struct Tdrain {
+    tag: u32,
+}
+
+impl Message for Tdrain {
+    fn typ(&self) -> i8 {
+        types::T_DRAIN
+    }
+
+    fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    fn buf(&self) -> Vec<u8> {
+        Vec::new()
+    }
+}
+
+/** Response from the client to a `Tdrain` message */
+struct Rdrain {
+    tag: u32,
+}
+
+impl Message for Rdrain {
+    fn typ(&self) -> i8 {
+        types::R_DRAIN
+    }
+
+    fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    fn buf(&self) -> Vec<u8> {
+        Vec::new()
+    }
+}
+
+/** Used to check liveness */
+struct Tping {
+    tag: u32,
+}
+
+impl Message for Tping {
+    fn typ(&self) -> i8 {
+        types::T_PING
+    }
+
+    fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    fn buf(&self) -> Vec<u8> {
+        Vec::new()
+    }
+}
