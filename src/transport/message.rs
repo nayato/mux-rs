@@ -1,3 +1,6 @@
+use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
+use ::{Dentry, Dtab, Path};
+
 /**
  * Indicates that encoding or decoding of a Mux message failed.
  * Reason for failure should be provided by the `why` string.
@@ -96,48 +99,37 @@ trait MarkerMessage: Message {
 
 mod init {
     use std::io::Read;
-    use std::mem::transmute;
+    use std::io::Cursor;
+    use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
     pub fn encode(version: u16, headers: Vec<(Vec<u8>, Vec<u8>)>) -> Vec<u8> {
-        let mut size: usize = 2; // 2 bytes for version
-        for pair in &headers {
-            // 8 bytes for length encoding of k, v
-            size += 8 + pair.0.len() + pair.1.len();
-        }
-        let mut buf = Vec::with_capacity(size);
-        let bytes: [u8; 2] = unsafe { transmute(version.to_be()) };
-        buf.extend_from_slice(&bytes);
+        let mut buf = Vec::new();
+        buf.write_u16::<BigEndian>(version).unwrap();
         for pair in &headers {
             let k = &pair.0;
             let v = &pair.1;
-            let bytes: [u8; 4] = unsafe { transmute((k.len() as u32).to_be()) };
-            buf.extend_from_slice(&bytes);
+            buf.write_u32::<BigEndian>(k.len() as u32).unwrap();
             buf.extend_from_slice(&k);
-            let bytes: [u8; 4] = unsafe { transmute((v.len() as u32).to_be()) };
-            buf.extend_from_slice(&bytes);
+            buf.write_u32::<BigEndian>(v.len() as u32).unwrap();
             buf.extend_from_slice(&v);
         }
         buf
     }
 
     pub fn decode(buf: Vec<u8>) -> (u16, Vec<(Vec<u8>, Vec<u8>)>) {
-        let mut buf = &buf[..];
-        let mut bytes: [u8; 2] = [0; 2];
-        buf.read_exact(&mut bytes).unwrap();
-        let version: u16 = u16::from_be(unsafe { transmute::<[u8; 2], u16>(bytes) });
+        let len = buf.len() as u64;
+        let mut rdr = Cursor::new(buf);
+        let version = rdr.read_u16::<BigEndian>().unwrap();
         let mut headers: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-        while buf.len() > 0 {
-            let mut bytes: [u8; 4] = [0; 4];
-            buf.read_exact(&mut bytes).unwrap();
-            let kl = u32::from_be(unsafe { transmute::<[u8; 4], u32>(bytes) }) as usize;
+        while rdr.position() < len {
+            let kl = rdr.read_u32::<BigEndian>().unwrap() as usize;
             let mut k: Vec<u8> = Vec::new();
             k.resize(kl, 0);
-            buf.read_exact(&mut k).unwrap();
-            buf.read_exact(&mut bytes).unwrap();
-            let vl = u32::from_be(unsafe { transmute::<[u8; 4], u32>(bytes) }) as usize;
+            rdr.read_exact(&mut k).unwrap();
+            let vl = rdr.read_u32::<BigEndian>().unwrap() as usize;
             let mut v: Vec<u8> = Vec::new();
             v.resize(vl, 0);
-            buf.read_exact(&mut v).unwrap();
+            rdr.read_exact(&mut v).unwrap();
             headers.push((k, v));
         }
         (version, headers)
@@ -287,5 +279,52 @@ impl Message for RreqNack {
 
     fn buf(&self) -> Vec<u8> {
         vec![2]
+    }
+}
+
+struct Tdispatch {
+    tag: u32,
+    contexts: Vec<(Vec<u8>, Vec<u8>)>,
+    dst: Path,
+    dtab: Dtab,
+    req: Vec<u8>,
+}
+
+impl Message for Tdispatch {
+    fn typ(&self) -> i8 {
+        types::T_DISPATCH
+    }
+
+    fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    fn buf(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.write_u16::<BigEndian>(self.contexts.len() as u16).unwrap();
+        for pair in &self.contexts {
+            let k = &pair.0;
+            let v = &pair.1;
+            buf.write_u16::<BigEndian>(k.len() as u16).unwrap();
+            buf.extend_from_slice(&k);
+            buf.write_u16::<BigEndian>(v.len() as u16).unwrap();
+            buf.extend_from_slice(&v);
+        }
+
+        buf.write_u16::<BigEndian>(self.dst.len() as u16).unwrap();
+        let bytes = self.dst.clone().into_bytes();
+        buf.extend_from_slice(&bytes[..]);
+
+        buf.write_u16::<BigEndian>(self.dtab.len() as u16).unwrap();
+        for dentry in &self.dtab.dentries {
+            let srcbytes = dentry.prefix.clone().into_bytes();
+            let treebytes = dentry.dst.clone().into_bytes();
+            buf.write_u16::<BigEndian>(srcbytes.len() as u16).unwrap();
+            buf.extend_from_slice(&srcbytes);
+            buf.write_u16::<BigEndian>(treebytes.len() as u16).unwrap();
+            buf.extend_from_slice(&treebytes);
+        }
+        buf.extend_from_slice(&self.req[..]);
+        buf
     }
 }
