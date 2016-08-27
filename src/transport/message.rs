@@ -504,3 +504,51 @@ impl Message for Tping {
         Vec::new()
     }
 }
+
+enum Message1 {
+    Tinit {
+        tag: u32,
+        version: u16,
+        headers: Vec<(Vec<u8>, Vec<u8>)>,
+    },
+    Rinit {
+        tag: u32,
+        version: u16,
+        headers: Vec<(Vec<u8>, Vec<u8>)>,
+    },
+    Treq { tag: u32, req: Vec<u8> },
+    RreqOk { tag: u32, reply: Vec<u8> },
+    RreqError { tag: u32, error: String },
+    RreqNack { tag: u32 },
+    Tdispatch {
+        tag: u32,
+        contexts: Vec<(Vec<u8>, Vec<u8>)>,
+        dst: Path,
+        dtab: Dtab,
+        req: Vec<u8>,
+    },
+    RdispatchOk {
+        tag: u32,
+        contexts: Vec<(Vec<u8>, Vec<u8>)>,
+        reply: Vec<u8>,
+    },
+    RdispatchError {
+        tag: u32,
+        contexts: Vec<(Vec<u8>, Vec<u8>)>,
+        error: String,
+    },
+    RdispatchNack {
+        tag: u32,
+        contexts: Vec<(Vec<u8>, Vec<u8>)>,
+    },
+    Fragment { typ: i8, tag: u32, buf: Vec<u8> },
+    Tdrain { tag: u32 },
+    Rdrain { tag: u32 },
+    Tping { tag: u32 },
+    PreEncodedTping,
+    Rping { tag: u32 },
+    Rerr { tag: u32, error: String },
+    Tdiscarded { which: u32, why: String },
+    Rdiscarded { tag: u32 },
+    Tlease { unit: u8, how_long: u64 },
+}
