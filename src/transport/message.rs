@@ -50,14 +50,14 @@ mod types {
 }
 
 mod tags {
-    const MARKER_TAG: u32 = 0;
+    pub const MARKER_TAG: u32 = 0;
     // We reserve a tag for a default ping message so that we
     // can cache a full ping message and avoid encoding it
     // every time.
-    const PING_TAG: u32 = 1;
+    pub const PING_TAG: u32 = 1;
     const MIN_TAG: u32 = PING_TAG + 1;
-    const MAX_TAG: u32 = (1 << 23) - 1;
-    const TAG_MSB: u32 = (1 << 23);
+    pub const MAX_TAG: u32 = (1 << 23) - 1;
+    pub const TAG_MSB: u32 = (1 << 23);
 
     fn extract_type(header: u32) -> i8 {
         (header >> 24 & 0xff) as i8
@@ -195,7 +195,12 @@ enum CaseMessage {
     PreEncodedTping,
     /** Response to a `Tping` message */
     Rping { tag: u32 },
+    /** Indicates that the corresponding T message produced an error. */
     Rerr { tag: u32, error: String },
+    /**
+     * Indicates that the `Treq` with the tag indicated by `which` has been discarded
+     * by the client.
+     */
     Tdiscarded { which: u32, why: String },
     Rdiscarded { tag: u32 },
     Tlease { unit: u8, how_long: u64 },
@@ -219,7 +224,13 @@ impl Message for CaseMessage {
             CaseMessage::Rdrain { .. } => types::R_DRAIN,
             CaseMessage::Tping { .. } => types::T_PING,
             CaseMessage::Rping { .. } => types::R_PING,
+            // Use the old Rerr type in a transition period so that we
+            // can be reasonably sure we remain backwards compatible with
+            // old servers.
             CaseMessage::Rerr { .. } => types::BAD_R_ERR,
+            // Use the old Tdiscarded type in a transition period so that we
+            // can be reasonably sure we remain backwards compatible with
+            // old servers.
             CaseMessage::Tdiscarded { .. } => types::BAD_T_DISCARDED,
             CaseMessage::Rdiscarded { .. } => types::R_DISCARDED,
             CaseMessage::Tlease { .. } => types::T_LEASE,
@@ -227,7 +238,6 @@ impl Message for CaseMessage {
         }
     }
 
-    #[allow(unused_variables)]
     fn tag(&self) -> u32 {
         match *self {
             CaseMessage::Tinit { tag, .. } |
@@ -240,46 +250,45 @@ impl Message for CaseMessage {
             CaseMessage::RdispatchOk { tag, .. } |
             CaseMessage::RdispatchError { tag, .. } |
             CaseMessage::RdispatchNack { tag, .. } |
+            CaseMessage::Fragment { tag, .. } |
             CaseMessage::Tdrain { tag } |
             CaseMessage::Rdrain { tag } |
             CaseMessage::Tping { tag } |
             CaseMessage::Rping { tag } |
             CaseMessage::Rerr { tag, .. } |
             CaseMessage::Rdiscarded { tag } => tag,
-            CaseMessage::Fragment { typ, tag, .. } => tag,
             CaseMessage::Tdiscarded { .. } |
             CaseMessage::Tlease { .. } => 0,
             CaseMessage::PreEncodedTping => 0,
         }
     }
 
-    #[allow(unused_variables)]
     fn buf(&self) -> Vec<u8> {
         match *self {
-            CaseMessage::Tinit { tag, version, ref headers } => {
+            CaseMessage::Tinit { version, ref headers, .. } => {
                 init::encode(version, headers.clone())
             }
-            CaseMessage::Rinit { tag, version, ref headers } => {
+            CaseMessage::Rinit { version, ref headers, .. } => {
                 init::encode(version, headers.clone())
             }
-            CaseMessage::Treq { tag, ref req } => {
+            CaseMessage::Treq { ref req, .. } => {
                 let mut vec = vec![0];
                 vec.extend_from_slice(&req[..]);
                 vec
             }
-            CaseMessage::RreqOk { tag, ref reply } => {
+            CaseMessage::RreqOk { ref reply, .. } => {
                 let mut vec = vec![0];
                 vec.extend_from_slice(&reply[..]);
                 vec
             }
-            CaseMessage::RreqError { tag, ref error } => {
+            CaseMessage::RreqError { ref error, .. } => {
                 let mut vec = vec![1];
                 let bytes = error.clone().into_bytes();
                 vec.extend_from_slice(&bytes[..]);
                 vec
             }
             CaseMessage::RreqNack { .. } => vec![2],
-            CaseMessage::Tdispatch { tag, ref contexts, ref dst, ref dtab, ref req } => {
+            CaseMessage::Tdispatch { ref contexts, ref dst, ref dtab, ref req, .. } => {
                 let mut buf = Vec::new();
                 buf.write_u16::<BigEndian>(contexts.len() as u16).unwrap();
                 for pair in contexts {
@@ -307,7 +316,7 @@ impl Message for CaseMessage {
                 buf.extend_from_slice(&req[..]);
                 buf
             }
-            CaseMessage::RdispatchOk { tag, ref contexts, ref reply } => {
+            CaseMessage::RdispatchOk { ref contexts, ref reply, .. } => {
                 let mut buf = Vec::new();
                 buf.push(0u8);
                 buf.write_u16::<BigEndian>(contexts.len() as u16).unwrap();
@@ -322,7 +331,7 @@ impl Message for CaseMessage {
                 buf.extend_from_slice(&reply[..]);
                 buf
             }
-            CaseMessage::RdispatchError { tag, ref contexts, ref error } => {
+            CaseMessage::RdispatchError { ref contexts, ref error, .. } => {
                 let mut buf = Vec::new();
                 buf.push(1u8);
                 buf.write_u16::<BigEndian>(contexts.len() as u16).unwrap();
@@ -338,7 +347,7 @@ impl Message for CaseMessage {
                 buf.extend_from_slice(&bytes[..]);
                 buf
             }
-            CaseMessage::RdispatchNack { tag, ref contexts } => {
+            CaseMessage::RdispatchNack { ref contexts, .. } => {
                 let mut buf = Vec::new();
                 buf.push(2u8);
                 buf.write_u16::<BigEndian>(contexts.len() as u16).unwrap();
@@ -352,17 +361,50 @@ impl Message for CaseMessage {
                 }
                 buf
             }
-            CaseMessage::Fragment { typ, tag, ref buf } => buf.clone(),
+            CaseMessage::Fragment { ref buf, .. } => buf.clone(),
             CaseMessage::Tdrain { .. } |
             CaseMessage::Rdrain { .. } |
             CaseMessage::Tping { .. } |
-            CaseMessage::Rping { .. } => Vec::new(),
-            // CaseMessage::Rerr { .. } => types::BAD_R_ERR,
-            // CaseMessage::Tdiscarded { .. } => types::BAD_T_DISCARDED,
-            // CaseMessage::Rdiscarded { .. } => types::R_DISCARDED,
-            // CaseMessage::Tlease { .. } => types::T_LEASE,
-            // CaseMessage::PreEncodedTping => 0,
-            _ => vec![],
+            CaseMessage::Rping { .. } |
+            CaseMessage::Rdiscarded { .. } => vec![],
+            CaseMessage::Rerr { ref error, .. } => error.clone().into_bytes(),
+            CaseMessage::Tdiscarded { which, ref why } => {
+                let mut arr = vec![(which >> 16 & 0xff) as u8,
+                                   (which >> 8 & 0xff) as u8,
+                                   (which & 0xff) as u8];
+                let why = why.clone().into_bytes();
+                arr.extend_from_slice(&why[..]);
+                arr
+            }
+            CaseMessage::Tlease { unit, how_long } => {
+                let mut buf = Vec::new();
+                buf.push(unit);
+                buf.write_u64::<BigEndian>(how_long).unwrap();
+                buf
+            }
+            CaseMessage::PreEncodedTping => encode(CaseMessage::Tping { tag: tags::PING_TAG }),
+        }
+    }
+}
+
+
+fn encode(msg: CaseMessage) -> Vec<u8> {
+    match msg {
+        m @ CaseMessage::PreEncodedTping => m.buf(),
+        m => {
+            let tag = m.tag();
+            let typ = m.typ();
+            if tag < tags::MARKER_TAG || (tag & !tags::TAG_MSB) > tags::MAX_TAG {
+                panic!("invalid tag number {}", tag);
+            }
+
+            let mut head = vec![typ as u8,
+                                (tag >> 16 & 0xff) as u8,
+                                (tag >> 8 & 0xff) as u8,
+                                (tag & 0xff) as u8];
+
+            head.extend_from_slice(&m.buf()[..]);
+            head
         }
     }
 }
