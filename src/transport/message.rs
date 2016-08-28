@@ -2,11 +2,6 @@ use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 use ::{Dentry, Dtab, Path};
 
 /**
- * Indicates that encoding or decoding of a Mux message failed.
- * Reason for failure should be provided by the `why` string.
- */
-// case class BadMessageException(why: String) extends Exception(why)
-/**
  * Documentation details are in the [[com.twitter.finagle.mux]] package object.
  */
 trait Message {
@@ -81,22 +76,6 @@ mod tags {
     }
 }
 
-// private def mkByte(b: Byte) = Buf.ByteArray.Owned(Array(b))
-
-// private val bufOfChar = Array[Buf](mkByte(0), mkByte(1), mkByte(2))
-
-trait EmptyMessage: Message {
-    fn buf(&self) -> Vec<u8> {
-        Vec::new()
-    }
-}
-
-trait MarkerMessage: Message {
-    fn tag(&self) -> u32 {
-        0
-    }
-}
-
 mod init {
     use std::io::Read;
     use std::io::Cursor;
@@ -148,364 +127,7 @@ mod init {
     }
 }
 
-struct Tinit {
-    tag: u32,
-    version: u16,
-    headers: Vec<(Vec<u8>, Vec<u8>)>,
-}
-
-impl Message for Tinit {
-    fn typ(&self) -> i8 {
-        types::T_INIT
-    }
-
-    fn tag(&self) -> u32 {
-        self.tag
-    }
-
-    fn buf(&self) -> Vec<u8> {
-        init::encode(self.version, self.headers.clone())
-    }
-}
-
-struct Rinit {
-    tag: u32,
-    version: u16,
-    headers: Vec<(Vec<u8>, Vec<u8>)>,
-}
-
-impl Message for Rinit {
-    fn typ(&self) -> i8 {
-        types::R_INIT
-    }
-
-    fn tag(&self) -> u32 {
-        self.tag
-    }
-
-    fn buf(&self) -> Vec<u8> {
-        init::encode(self.version, self.headers.clone())
-    }
-}
-
-/**
-   * A transmit request message.
-   *
-   * Note, Treq messages are deprecated in favor of [[Tdispatch]] and will likely
-   * be removed in a future version of mux.
-   */
-struct Treq {
-    tag: u32,
-    req: Vec<u8>,
-}
-
-impl Message for Treq {
-    fn typ(&self) -> i8 {
-        types::T_REQ
-    }
-
-    fn tag(&self) -> u32 {
-        self.tag
-    }
-
-    fn buf(&self) -> Vec<u8> {
-        let mut vec = vec![0];
-        vec.extend_from_slice(&self.req[..]);
-        vec
-    }
-}
-
-/**
- * A reply to a `Treq` message.
- *
- * Note, Rreq messages are deprecated in favor of [[Rdispatch]] and will likely
- * be removed in a future version of mux.
- */
-struct RreqOk {
-    tag: u32,
-    reply: Vec<u8>,
-}
-
-impl Message for RreqOk {
-    fn typ(&self) -> i8 {
-        types::R_REQ
-    }
-
-    fn tag(&self) -> u32 {
-        self.tag
-    }
-
-    fn buf(&self) -> Vec<u8> {
-        let mut vec = vec![0];
-        vec.extend_from_slice(&self.reply[..]);
-        vec
-    }
-}
-
-struct RreqError {
-    tag: u32,
-    error: String,
-}
-
-impl Message for RreqError {
-    fn typ(&self) -> i8 {
-        types::R_REQ
-    }
-
-    fn tag(&self) -> u32 {
-        self.tag
-    }
-
-    fn buf(&self) -> Vec<u8> {
-        let mut vec = vec![1];
-        let bytes = self.error.clone().into_bytes();
-        vec.extend_from_slice(&bytes[..]);
-        vec
-    }
-}
-
-struct RreqNack {
-    tag: u32,
-}
-
-impl Message for RreqNack {
-    fn typ(&self) -> i8 {
-        types::R_REQ
-    }
-
-    fn tag(&self) -> u32 {
-        self.tag
-    }
-
-    fn buf(&self) -> Vec<u8> {
-        vec![2]
-    }
-}
-
-struct Tdispatch {
-    tag: u32,
-    contexts: Vec<(Vec<u8>, Vec<u8>)>,
-    dst: Path,
-    dtab: Dtab,
-    req: Vec<u8>,
-}
-
-impl Message for Tdispatch {
-    fn typ(&self) -> i8 {
-        types::T_DISPATCH
-    }
-
-    fn tag(&self) -> u32 {
-        self.tag
-    }
-
-    fn buf(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        buf.write_u16::<BigEndian>(self.contexts.len() as u16).unwrap();
-        for pair in &self.contexts {
-            let k = &pair.0;
-            let v = &pair.1;
-            buf.write_u16::<BigEndian>(k.len() as u16).unwrap();
-            buf.extend_from_slice(&k);
-            buf.write_u16::<BigEndian>(v.len() as u16).unwrap();
-            buf.extend_from_slice(&v);
-        }
-
-        buf.write_u16::<BigEndian>(self.dst.len() as u16).unwrap();
-        let bytes = self.dst.clone().into_bytes();
-        buf.extend_from_slice(&bytes[..]);
-
-        buf.write_u16::<BigEndian>(self.dtab.len() as u16).unwrap();
-        for dentry in &self.dtab.dentries {
-            let srcbytes = dentry.prefix.clone().into_bytes();
-            let treebytes = dentry.dst.clone().into_bytes();
-            buf.write_u16::<BigEndian>(srcbytes.len() as u16).unwrap();
-            buf.extend_from_slice(&srcbytes);
-            buf.write_u16::<BigEndian>(treebytes.len() as u16).unwrap();
-            buf.extend_from_slice(&treebytes);
-        }
-        buf.extend_from_slice(&self.req[..]);
-        buf
-    }
-}
-
-struct RdispatchOk {
-    tag: u32,
-    contexts: Vec<(Vec<u8>, Vec<u8>)>,
-    reply: Vec<u8>,
-}
-
-impl Message for RdispatchOk {
-    fn typ(&self) -> i8 {
-        types::R_DISPATCH
-    }
-
-    fn tag(&self) -> u32 {
-        self.tag
-    }
-
-    fn buf(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        buf.push(0u8);
-        buf.write_u16::<BigEndian>(self.contexts.len() as u16).unwrap();
-        for pair in &self.contexts {
-            let k = &pair.0;
-            let v = &pair.1;
-            buf.write_u16::<BigEndian>(k.len() as u16).unwrap();
-            buf.extend_from_slice(&k);
-            buf.write_u16::<BigEndian>(v.len() as u16).unwrap();
-            buf.extend_from_slice(&v);
-        }
-        buf.extend_from_slice(&self.reply[..]);
-        buf
-    }
-}
-
-struct RdispatchError {
-    tag: u32,
-    contexts: Vec<(Vec<u8>, Vec<u8>)>,
-    error: String,
-}
-
-impl Message for RdispatchError {
-    fn typ(&self) -> i8 {
-        types::R_DISPATCH
-    }
-
-    fn tag(&self) -> u32 {
-        self.tag
-    }
-
-    fn buf(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        buf.push(1u8);
-        buf.write_u16::<BigEndian>(self.contexts.len() as u16).unwrap();
-        for pair in &self.contexts {
-            let k = &pair.0;
-            let v = &pair.1;
-            buf.write_u16::<BigEndian>(k.len() as u16).unwrap();
-            buf.extend_from_slice(&k);
-            buf.write_u16::<BigEndian>(v.len() as u16).unwrap();
-            buf.extend_from_slice(&v);
-        }
-        let bytes = self.error.clone().into_bytes();
-        buf.extend_from_slice(&bytes[..]);
-        buf
-    }
-}
-
-struct RdispatchNack {
-    tag: u32,
-    contexts: Vec<(Vec<u8>, Vec<u8>)>,
-}
-
-impl Message for RdispatchNack {
-    fn typ(&self) -> i8 {
-        types::R_DISPATCH
-    }
-
-    fn tag(&self) -> u32 {
-        self.tag
-    }
-
-    fn buf(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        buf.push(2u8);
-        buf.write_u16::<BigEndian>(self.contexts.len() as u16).unwrap();
-        for pair in &self.contexts {
-            let k = &pair.0;
-            let v = &pair.1;
-            buf.write_u16::<BigEndian>(k.len() as u16).unwrap();
-            buf.extend_from_slice(&k);
-            buf.write_u16::<BigEndian>(v.len() as u16).unwrap();
-            buf.extend_from_slice(&v);
-        }
-        buf
-    }
-}
-
-/**
- * A fragment, as defined by the mux spec, is a message with its tag MSB
- * set to 1.
- */
-struct Fragment {
-    typ: i8,
-    tag: u32,
-    buf: Vec<u8>,
-}
-
-impl Message for Fragment {
-    fn typ(&self) -> i8 {
-        self.typ
-    }
-
-    fn tag(&self) -> u32 {
-        self.tag
-    }
-
-    fn buf(&self) -> Vec<u8> {
-        self.buf.clone()
-    }
-}
-
-/** Indicates to the client to stop sending new requests. */
-struct Tdrain {
-    tag: u32,
-}
-
-impl Message for Tdrain {
-    fn typ(&self) -> i8 {
-        types::T_DRAIN
-    }
-
-    fn tag(&self) -> u32 {
-        self.tag
-    }
-
-    fn buf(&self) -> Vec<u8> {
-        Vec::new()
-    }
-}
-
-/** Response from the client to a `Tdrain` message */
-struct Rdrain {
-    tag: u32,
-}
-
-impl Message for Rdrain {
-    fn typ(&self) -> i8 {
-        types::R_DRAIN
-    }
-
-    fn tag(&self) -> u32 {
-        self.tag
-    }
-
-    fn buf(&self) -> Vec<u8> {
-        Vec::new()
-    }
-}
-
-/** Used to check liveness */
-struct Tping {
-    tag: u32,
-}
-
-impl Message for Tping {
-    fn typ(&self) -> i8 {
-        types::T_PING
-    }
-
-    fn tag(&self) -> u32 {
-        self.tag
-    }
-
-    fn buf(&self) -> Vec<u8> {
-        Vec::new()
-    }
-}
-
-enum Message1 {
+enum CaseMessage {
     Tinit {
         tag: u32,
         version: u16,
@@ -516,7 +138,19 @@ enum Message1 {
         version: u16,
         headers: Vec<(Vec<u8>, Vec<u8>)>,
     },
+    /**
+     * A transmit request message.
+     *
+     * Note, Treq messages are deprecated in favor of [[Tdispatch]] and will likely
+     * be removed in a future version of mux.
+     */
     Treq { tag: u32, req: Vec<u8> },
+    /**
+     * A reply to a `Treq` message.
+     *
+     * Note, Rreq messages are deprecated in favor of [[Rdispatch]] and will likely
+     * be removed in a future version of mux.
+     */
     RreqOk { tag: u32, reply: Vec<u8> },
     RreqError { tag: u32, error: String },
     RreqNack { tag: u32 },
@@ -527,6 +161,7 @@ enum Message1 {
         dtab: Dtab,
         req: Vec<u8>,
     },
+    /** A reply to a `Tdispatch` message */
     RdispatchOk {
         tag: u32,
         contexts: Vec<(Vec<u8>, Vec<u8>)>,
@@ -541,14 +176,193 @@ enum Message1 {
         tag: u32,
         contexts: Vec<(Vec<u8>, Vec<u8>)>,
     },
+    /**
+     * A fragment, as defined by the mux spec, is a message with its tag MSB
+     * set to 1.
+     */
     Fragment { typ: i8, tag: u32, buf: Vec<u8> },
+    /** Indicates to the client to stop sending new requests. */
     Tdrain { tag: u32 },
+    /** Response from the client to a `Tdrain` message */
     Rdrain { tag: u32 },
+    /** Used to check liveness */
     Tping { tag: u32 },
+    /**
+     * We pre-encode a ping message with the reserved ping tag
+     * (PingTag) in order to avoid re-encoding this frequently sent
+     * message.
+     */
     PreEncodedTping,
+    /** Response to a `Tping` message */
     Rping { tag: u32 },
     Rerr { tag: u32, error: String },
     Tdiscarded { which: u32, why: String },
     Rdiscarded { tag: u32 },
     Tlease { unit: u8, how_long: u64 },
+}
+
+impl Message for CaseMessage {
+    fn typ(&self) -> i8 {
+        match *self {
+            CaseMessage::Tinit { .. } => types::T_INIT,
+            CaseMessage::Rinit { .. } => types::R_INIT,
+            CaseMessage::Treq { .. } => types::T_REQ,
+            CaseMessage::RreqOk { .. } |
+            CaseMessage::RreqError { .. } |
+            CaseMessage::RreqNack { .. } => types::R_REQ,
+            CaseMessage::Tdispatch { .. } => types::T_DISPATCH,
+            CaseMessage::RdispatchOk { .. } |
+            CaseMessage::RdispatchError { .. } |
+            CaseMessage::RdispatchNack { .. } => types::R_DISPATCH,
+            CaseMessage::Fragment { typ, .. } => typ,
+            CaseMessage::Tdrain { .. } => types::T_DRAIN,
+            CaseMessage::Rdrain { .. } => types::R_DRAIN,
+            CaseMessage::Tping { .. } => types::T_PING,
+            CaseMessage::Rping { .. } => types::R_PING,
+            CaseMessage::Rerr { .. } => types::BAD_R_ERR,
+            CaseMessage::Tdiscarded { .. } => types::BAD_T_DISCARDED,
+            CaseMessage::Rdiscarded { .. } => types::R_DISCARDED,
+            CaseMessage::Tlease { .. } => types::T_LEASE,
+            CaseMessage::PreEncodedTping => 0,
+        }
+    }
+
+    #[allow(unused_variables)]
+    fn tag(&self) -> u32 {
+        match *self {
+            CaseMessage::Tinit { tag, .. } |
+            CaseMessage::Rinit { tag, .. } |
+            CaseMessage::Treq { tag, .. } |
+            CaseMessage::RreqOk { tag, .. } |
+            CaseMessage::RreqError { tag, .. } |
+            CaseMessage::RreqNack { tag } |
+            CaseMessage::Tdispatch { tag, .. } |
+            CaseMessage::RdispatchOk { tag, .. } |
+            CaseMessage::RdispatchError { tag, .. } |
+            CaseMessage::RdispatchNack { tag, .. } |
+            CaseMessage::Tdrain { tag } |
+            CaseMessage::Rdrain { tag } |
+            CaseMessage::Tping { tag } |
+            CaseMessage::Rping { tag } |
+            CaseMessage::Rerr { tag, .. } |
+            CaseMessage::Rdiscarded { tag } => tag,
+            CaseMessage::Fragment { typ, tag, .. } => tag,
+            CaseMessage::Tdiscarded { .. } |
+            CaseMessage::Tlease { .. } => 0,
+            CaseMessage::PreEncodedTping => 0,
+        }
+    }
+
+    #[allow(unused_variables)]
+    fn buf(&self) -> Vec<u8> {
+        match *self {
+            CaseMessage::Tinit { tag, version, ref headers } => {
+                init::encode(version, headers.clone())
+            }
+            CaseMessage::Rinit { tag, version, ref headers } => {
+                init::encode(version, headers.clone())
+            }
+            CaseMessage::Treq { tag, ref req } => {
+                let mut vec = vec![0];
+                vec.extend_from_slice(&req[..]);
+                vec
+            }
+            CaseMessage::RreqOk { tag, ref reply } => {
+                let mut vec = vec![0];
+                vec.extend_from_slice(&reply[..]);
+                vec
+            }
+            CaseMessage::RreqError { tag, ref error } => {
+                let mut vec = vec![1];
+                let bytes = error.clone().into_bytes();
+                vec.extend_from_slice(&bytes[..]);
+                vec
+            }
+            CaseMessage::RreqNack { .. } => vec![2],
+            CaseMessage::Tdispatch { tag, ref contexts, ref dst, ref dtab, ref req } => {
+                let mut buf = Vec::new();
+                buf.write_u16::<BigEndian>(contexts.len() as u16).unwrap();
+                for pair in contexts {
+                    let k = &pair.0;
+                    let v = &pair.1;
+                    buf.write_u16::<BigEndian>(k.len() as u16).unwrap();
+                    buf.extend_from_slice(&k);
+                    buf.write_u16::<BigEndian>(v.len() as u16).unwrap();
+                    buf.extend_from_slice(&v);
+                }
+
+                buf.write_u16::<BigEndian>(dst.len() as u16).unwrap();
+                let bytes = dst.clone().into_bytes();
+                buf.extend_from_slice(&bytes[..]);
+
+                buf.write_u16::<BigEndian>(dtab.len() as u16).unwrap();
+                for dentry in &dtab.dentries {
+                    let srcbytes = dentry.prefix.clone().into_bytes();
+                    let treebytes = dentry.dst.clone().into_bytes();
+                    buf.write_u16::<BigEndian>(srcbytes.len() as u16).unwrap();
+                    buf.extend_from_slice(&srcbytes);
+                    buf.write_u16::<BigEndian>(treebytes.len() as u16).unwrap();
+                    buf.extend_from_slice(&treebytes);
+                }
+                buf.extend_from_slice(&req[..]);
+                buf
+            }
+            CaseMessage::RdispatchOk { tag, ref contexts, ref reply } => {
+                let mut buf = Vec::new();
+                buf.push(0u8);
+                buf.write_u16::<BigEndian>(contexts.len() as u16).unwrap();
+                for pair in contexts {
+                    let k = &pair.0;
+                    let v = &pair.1;
+                    buf.write_u16::<BigEndian>(k.len() as u16).unwrap();
+                    buf.extend_from_slice(&k);
+                    buf.write_u16::<BigEndian>(v.len() as u16).unwrap();
+                    buf.extend_from_slice(&v);
+                }
+                buf.extend_from_slice(&reply[..]);
+                buf
+            }
+            CaseMessage::RdispatchError { tag, ref contexts, ref error } => {
+                let mut buf = Vec::new();
+                buf.push(1u8);
+                buf.write_u16::<BigEndian>(contexts.len() as u16).unwrap();
+                for pair in contexts {
+                    let k = &pair.0;
+                    let v = &pair.1;
+                    buf.write_u16::<BigEndian>(k.len() as u16).unwrap();
+                    buf.extend_from_slice(&k);
+                    buf.write_u16::<BigEndian>(v.len() as u16).unwrap();
+                    buf.extend_from_slice(&v);
+                }
+                let bytes = error.clone().into_bytes();
+                buf.extend_from_slice(&bytes[..]);
+                buf
+            }
+            CaseMessage::RdispatchNack { tag, ref contexts } => {
+                let mut buf = Vec::new();
+                buf.push(2u8);
+                buf.write_u16::<BigEndian>(contexts.len() as u16).unwrap();
+                for pair in contexts {
+                    let k = &pair.0;
+                    let v = &pair.1;
+                    buf.write_u16::<BigEndian>(k.len() as u16).unwrap();
+                    buf.extend_from_slice(&k);
+                    buf.write_u16::<BigEndian>(v.len() as u16).unwrap();
+                    buf.extend_from_slice(&v);
+                }
+                buf
+            }
+            CaseMessage::Fragment { typ, tag, ref buf } => buf.clone(),
+            CaseMessage::Tdrain { .. } |
+            CaseMessage::Rdrain { .. } |
+            CaseMessage::Tping { .. } |
+            CaseMessage::Rping { .. } => Vec::new(),
+            // CaseMessage::Rerr { .. } => types::BAD_R_ERR,
+            // CaseMessage::Tdiscarded { .. } => types::BAD_T_DISCARDED,
+            // CaseMessage::Rdiscarded { .. } => types::R_DISCARDED,
+            // CaseMessage::Tlease { .. } => types::T_LEASE,
+            // CaseMessage::PreEncodedTping => 0,
+            _ => vec![],
+        }
+    }
 }
