@@ -1,52 +1,36 @@
+use std::io::Cursor;
+use std::io::Read;
+
 use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 use ::{Dentry, Dtab, Path};
 
-/**
- * Documentation details are in the [[com.twitter.finagle.mux]] package object.
- */
-trait Message {
-    /**
-     * Values should correspond to the constants defined in
-     * [[com.twitter.finagle.mux.Message.Types]]
-     */
-    fn typ(&self) -> i8;
-
-    /** Only 3 of its bytes are used. */
-    fn tag(&self) -> u32;
-
-    /**
-     * The body of the message omitting size, typ, and tag.
-     */
-    fn buf(&self) -> Vec<u8>;
-}
-
 mod types {
     // Application messages:
-    pub const T_REQ: i8 = 1;
-    pub const R_REQ: i8 = -1;
+    pub const TREQ: i8 = 1;
+    pub const RREQ: i8 = -1;
 
-    pub const T_DISPATCH: i8 = 2;
-    pub const R_DISPATCH: i8 = -2;
+    pub const TDISPATCH: i8 = 2;
+    pub const RDISPATCH: i8 = -2;
 
     // Control messages:
-    pub const T_DRAIN: i8 = 64;
-    pub const R_DRAIN: i8 = -64;
-    pub const T_PING: i8 = 65;
-    pub const R_PING: i8 = -65;
+    pub const TDRAIN: i8 = 64;
+    pub const RDRAIN: i8 = -64;
+    pub const TPING: i8 = 65;
+    pub const RPING: i8 = -65;
 
-    pub const T_DISCARDED: i8 = 66;
-    pub const R_DISCARDED: i8 = -66;
+    pub const TDISCARDED: i8 = 66;
+    pub const RDISCARDED: i8 = -66;
 
-    pub const T_LEASE: i8 = 67;
+    pub const TLEASE: i8 = 67;
 
-    pub const T_INIT: i8 = 68;
-    pub const R_INIT: i8 = -68;
+    pub const TINIT: i8 = 68;
+    pub const RINIT: i8 = -68;
 
-    pub const R_ERR: i8 = -128;
+    pub const RERR: i8 = -128;
 
     // Old implementation flukes.
-    pub const BAD_T_DISCARDED: i8 = -62;
-    pub const BAD_R_ERR: i8 = 127;
+    pub const BAD_TDISCARDED: i8 = -62;
+    pub const BAD_RERR: i8 = 127;
 }
 
 mod tags {
@@ -77,8 +61,8 @@ mod tags {
 }
 
 mod init {
-    use std::io::Read;
     use std::io::Cursor;
+    use std::io::Read;
     use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
 
     pub fn encode(version: u16, headers: Vec<(Vec<u8>, Vec<u8>)>) -> Vec<u8> {
@@ -127,7 +111,7 @@ mod init {
     }
 }
 
-enum CaseMessage {
+enum Message {
     Tinit {
         tag: u32,
         version: u16,
@@ -206,89 +190,85 @@ enum CaseMessage {
     Tlease { unit: u8, how_long: u64 },
 }
 
-impl Message for CaseMessage {
+impl Message {
     fn typ(&self) -> i8 {
         match *self {
-            CaseMessage::Tinit { .. } => types::T_INIT,
-            CaseMessage::Rinit { .. } => types::R_INIT,
-            CaseMessage::Treq { .. } => types::T_REQ,
-            CaseMessage::RreqOk { .. } |
-            CaseMessage::RreqError { .. } |
-            CaseMessage::RreqNack { .. } => types::R_REQ,
-            CaseMessage::Tdispatch { .. } => types::T_DISPATCH,
-            CaseMessage::RdispatchOk { .. } |
-            CaseMessage::RdispatchError { .. } |
-            CaseMessage::RdispatchNack { .. } => types::R_DISPATCH,
-            CaseMessage::Fragment { typ, .. } => typ,
-            CaseMessage::Tdrain { .. } => types::T_DRAIN,
-            CaseMessage::Rdrain { .. } => types::R_DRAIN,
-            CaseMessage::Tping { .. } => types::T_PING,
-            CaseMessage::Rping { .. } => types::R_PING,
+            Message::Tinit { .. } => types::TINIT,
+            Message::Rinit { .. } => types::RINIT,
+            Message::Treq { .. } => types::TREQ,
+            Message::RreqOk { .. } |
+            Message::RreqError { .. } |
+            Message::RreqNack { .. } => types::RREQ,
+            Message::Tdispatch { .. } => types::TDISPATCH,
+            Message::RdispatchOk { .. } |
+            Message::RdispatchError { .. } |
+            Message::RdispatchNack { .. } => types::RDISPATCH,
+            Message::Fragment { typ, .. } => typ,
+            Message::Tdrain { .. } => types::TDRAIN,
+            Message::Rdrain { .. } => types::RDRAIN,
+            Message::Tping { .. } => types::TPING,
+            Message::Rping { .. } => types::RPING,
             // Use the old Rerr type in a transition period so that we
             // can be reasonably sure we remain backwards compatible with
             // old servers.
-            CaseMessage::Rerr { .. } => types::BAD_R_ERR,
+            Message::Rerr { .. } => types::BAD_RERR,
             // Use the old Tdiscarded type in a transition period so that we
             // can be reasonably sure we remain backwards compatible with
             // old servers.
-            CaseMessage::Tdiscarded { .. } => types::BAD_T_DISCARDED,
-            CaseMessage::Rdiscarded { .. } => types::R_DISCARDED,
-            CaseMessage::Tlease { .. } => types::T_LEASE,
-            CaseMessage::PreEncodedTping => 0,
+            Message::Tdiscarded { .. } => types::BAD_TDISCARDED,
+            Message::Rdiscarded { .. } => types::RDISCARDED,
+            Message::Tlease { .. } => types::TLEASE,
+            Message::PreEncodedTping => 0,
         }
     }
 
     fn tag(&self) -> u32 {
         match *self {
-            CaseMessage::Tinit { tag, .. } |
-            CaseMessage::Rinit { tag, .. } |
-            CaseMessage::Treq { tag, .. } |
-            CaseMessage::RreqOk { tag, .. } |
-            CaseMessage::RreqError { tag, .. } |
-            CaseMessage::RreqNack { tag } |
-            CaseMessage::Tdispatch { tag, .. } |
-            CaseMessage::RdispatchOk { tag, .. } |
-            CaseMessage::RdispatchError { tag, .. } |
-            CaseMessage::RdispatchNack { tag, .. } |
-            CaseMessage::Fragment { tag, .. } |
-            CaseMessage::Tdrain { tag } |
-            CaseMessage::Rdrain { tag } |
-            CaseMessage::Tping { tag } |
-            CaseMessage::Rping { tag } |
-            CaseMessage::Rerr { tag, .. } |
-            CaseMessage::Rdiscarded { tag } => tag,
-            CaseMessage::Tdiscarded { .. } |
-            CaseMessage::Tlease { .. } => 0,
-            CaseMessage::PreEncodedTping => 0,
+            Message::Tinit { tag, .. } |
+            Message::Rinit { tag, .. } |
+            Message::Treq { tag, .. } |
+            Message::RreqOk { tag, .. } |
+            Message::RreqError { tag, .. } |
+            Message::RreqNack { tag } |
+            Message::Tdispatch { tag, .. } |
+            Message::RdispatchOk { tag, .. } |
+            Message::RdispatchError { tag, .. } |
+            Message::RdispatchNack { tag, .. } |
+            Message::Fragment { tag, .. } |
+            Message::Tdrain { tag } |
+            Message::Rdrain { tag } |
+            Message::Tping { tag } |
+            Message::Rping { tag } |
+            Message::Rerr { tag, .. } |
+            Message::Rdiscarded { tag } => tag,
+            Message::Tdiscarded { .. } |
+            Message::Tlease { .. } => 0,
+            Message::PreEncodedTping => 0,
         }
     }
 
     fn buf(&self) -> Vec<u8> {
         match *self {
-            CaseMessage::Tinit { version, ref headers, .. } => {
-                init::encode(version, headers.clone())
-            }
-            CaseMessage::Rinit { version, ref headers, .. } => {
-                init::encode(version, headers.clone())
-            }
-            CaseMessage::Treq { ref req, .. } => {
+            Message::Tinit { version, ref headers, .. } => init::encode(version, headers.clone()),
+            Message::Rinit { version, ref headers, .. } => init::encode(version, headers.clone()),
+            Message::Treq { ref req, .. } => {
                 let mut vec = vec![0];
                 vec.extend_from_slice(&req[..]);
                 vec
             }
-            CaseMessage::RreqOk { ref reply, .. } => {
+            Message::RreqOk { ref reply, .. } => {
                 let mut vec = vec![0];
                 vec.extend_from_slice(&reply[..]);
                 vec
             }
-            CaseMessage::RreqError { ref error, .. } => {
+            Message::RreqError { ref error, .. } => {
                 let mut vec = vec![1];
                 let bytes = error.clone().into_bytes();
                 vec.extend_from_slice(&bytes[..]);
                 vec
             }
-            CaseMessage::RreqNack { .. } => vec![2],
-            CaseMessage::Tdispatch { ref contexts, ref dst, ref dtab, ref req, .. } => {
+            Message::RreqNack { .. } => vec![2],
+            Message::Tdispatch { ref contexts, ref dst, ref dtab, ref req, .. } => {
                 let mut buf = Vec::new();
                 buf.write_u16::<BigEndian>(contexts.len() as u16).unwrap();
                 for pair in contexts {
@@ -305,7 +285,7 @@ impl Message for CaseMessage {
                 buf.extend_from_slice(&bytes[..]);
 
                 buf.write_u16::<BigEndian>(dtab.len() as u16).unwrap();
-                for dentry in &dtab.dentries {
+                for dentry in dtab {
                     let srcbytes = dentry.prefix.clone().into_bytes();
                     let treebytes = dentry.dst.clone().into_bytes();
                     buf.write_u16::<BigEndian>(srcbytes.len() as u16).unwrap();
@@ -316,7 +296,7 @@ impl Message for CaseMessage {
                 buf.extend_from_slice(&req[..]);
                 buf
             }
-            CaseMessage::RdispatchOk { ref contexts, ref reply, .. } => {
+            Message::RdispatchOk { ref contexts, ref reply, .. } => {
                 let mut buf = Vec::new();
                 buf.push(0u8);
                 buf.write_u16::<BigEndian>(contexts.len() as u16).unwrap();
@@ -331,7 +311,7 @@ impl Message for CaseMessage {
                 buf.extend_from_slice(&reply[..]);
                 buf
             }
-            CaseMessage::RdispatchError { ref contexts, ref error, .. } => {
+            Message::RdispatchError { ref contexts, ref error, .. } => {
                 let mut buf = Vec::new();
                 buf.push(1u8);
                 buf.write_u16::<BigEndian>(contexts.len() as u16).unwrap();
@@ -347,7 +327,7 @@ impl Message for CaseMessage {
                 buf.extend_from_slice(&bytes[..]);
                 buf
             }
-            CaseMessage::RdispatchNack { ref contexts, .. } => {
+            Message::RdispatchNack { ref contexts, .. } => {
                 let mut buf = Vec::new();
                 buf.push(2u8);
                 buf.write_u16::<BigEndian>(contexts.len() as u16).unwrap();
@@ -361,14 +341,14 @@ impl Message for CaseMessage {
                 }
                 buf
             }
-            CaseMessage::Fragment { ref buf, .. } => buf.clone(),
-            CaseMessage::Tdrain { .. } |
-            CaseMessage::Rdrain { .. } |
-            CaseMessage::Tping { .. } |
-            CaseMessage::Rping { .. } |
-            CaseMessage::Rdiscarded { .. } => vec![],
-            CaseMessage::Rerr { ref error, .. } => error.clone().into_bytes(),
-            CaseMessage::Tdiscarded { which, ref why } => {
+            Message::Fragment { ref buf, .. } => buf.clone(),
+            Message::Tdrain { .. } |
+            Message::Rdrain { .. } |
+            Message::Tping { .. } |
+            Message::Rping { .. } |
+            Message::Rdiscarded { .. } => vec![],
+            Message::Rerr { ref error, .. } => error.clone().into_bytes(),
+            Message::Tdiscarded { which, ref why } => {
                 let mut arr = vec![(which >> 16 & 0xff) as u8,
                                    (which >> 8 & 0xff) as u8,
                                    (which & 0xff) as u8];
@@ -376,21 +356,20 @@ impl Message for CaseMessage {
                 arr.extend_from_slice(&why[..]);
                 arr
             }
-            CaseMessage::Tlease { unit, how_long } => {
+            Message::Tlease { unit, how_long } => {
                 let mut buf = Vec::new();
                 buf.push(unit);
                 buf.write_u64::<BigEndian>(how_long).unwrap();
                 buf
             }
-            CaseMessage::PreEncodedTping => encode(CaseMessage::Tping { tag: tags::PING_TAG }),
+            Message::PreEncodedTping => encode(Message::Tping { tag: tags::PING_TAG }),
         }
     }
 }
 
-
-fn encode(msg: CaseMessage) -> Vec<u8> {
+fn encode(msg: Message) -> Vec<u8> {
     match msg {
-        m @ CaseMessage::PreEncodedTping => m.buf(),
+        m @ Message::PreEncodedTping => m.buf(),
         m => {
             let tag = m.tag();
             let typ = m.typ();
@@ -406,5 +385,87 @@ fn encode(msg: CaseMessage) -> Vec<u8> {
             head.extend_from_slice(&m.buf()[..]);
             head
         }
+    }
+}
+
+fn decode_treq(tag: u32, buf: Vec<u8>) -> Message {
+    if buf.len() < 1 {
+        panic!("short Treq");
+    }
+
+    let mut rdr = Cursor::new(buf);
+    let mut nkeys = [0u8];
+    rdr.read_exact(&mut nkeys).unwrap();
+    if nkeys[0] != 0 {
+        panic!("Treq: too many keys");
+    }
+    let mut req: Vec<u8> = Vec::new();
+    rdr.read_to_end(&mut req).unwrap();
+    Message::Treq {
+        tag: tag,
+        req: req,
+    }
+}
+
+fn decode_contexts(rdr: &mut Cursor<Vec<u8>>) -> Vec<(Vec<u8>, Vec<u8>)> {
+    let mut contexts: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+    let mut n = rdr.read_u16::<BigEndian>().unwrap();
+    if n == 0 {
+        return contexts;
+    }
+    while n > 0 {
+        let kl = rdr.read_u16::<BigEndian>().unwrap() as usize;
+        let mut k: Vec<u8> = Vec::new();
+        k.resize(kl, 0);
+        rdr.read_exact(&mut k).unwrap();
+        let vl = rdr.read_u16::<BigEndian>().unwrap() as usize;
+        let mut v: Vec<u8> = Vec::new();
+        v.resize(vl, 0);
+        rdr.read_exact(&mut v).unwrap();
+        contexts.push((k, v));
+        n -= 1;
+    }
+    contexts
+}
+
+fn decode_tdispatch(tag: u32, buf: Vec<u8>) -> Message {
+    let mut rdr = Cursor::new(buf);
+    let contexts = decode_contexts(&mut rdr);
+    let ndst = rdr.read_u16::<BigEndian>().unwrap();
+    let mut dst = String::new();
+    if ndst > 0 {
+        let mut s: Vec<u8> = Vec::new();
+        s.resize(ndst as usize, 0);
+        rdr.read_exact(&mut s).unwrap();
+        dst = String::from_utf8(s).unwrap();
+    }
+
+    let mut nd = rdr.read_u16::<BigEndian>().unwrap();
+    let mut dtab: Dtab = Vec::new();
+    while nd > 0 {
+        let sl = rdr.read_u16::<BigEndian>().unwrap() as usize;
+        let mut s: Vec<u8> = Vec::new();
+        s.resize(sl as usize, 0);
+        rdr.read_exact(&mut s).unwrap();
+        let src = String::from_utf8(s).unwrap();
+        let dl = rdr.read_u16::<BigEndian>().unwrap() as usize;
+        let mut d: Vec<u8> = Vec::new();
+        d.resize(dl as usize, 0);
+        rdr.read_exact(&mut d).unwrap();
+        let dst = String::from_utf8(d).unwrap();
+        dtab.push(Dentry {
+            prefix: src,
+            dst: dst,
+        });
+        nd -= 1;
+    }
+    let mut req: Vec<u8> = Vec::new();
+    rdr.read_to_end(&mut req).unwrap();
+    Message::Tdispatch {
+        tag: tag,
+        contexts: contexts,
+        dst: dst,
+        dtab: dtab,
+        req: req,
     }
 }
