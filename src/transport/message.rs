@@ -469,3 +469,93 @@ fn decode_tdispatch(tag: u32, buf: Vec<u8>) -> Message {
         req: req,
     }
 }
+
+fn decode_rdispatch(tag: u32, buf: Vec<u8>) -> Message {
+    let mut rdr = Cursor::new(buf);
+    let mut status = [0u8];
+    rdr.read_exact(&mut status).unwrap();
+    let contexts = decode_contexts(&mut rdr);
+    let mut rest: Vec<u8> = Vec::new();
+    rdr.read_to_end(&mut rest).unwrap();
+    match status[0] {
+        0 => {
+            Message::RdispatchOk {
+                tag: tag,
+                contexts: contexts,
+                reply: rest,
+            }
+        }
+        1 => {
+            Message::RdispatchError {
+                tag: tag,
+                contexts: contexts,
+                error: String::from_utf8(rest).unwrap(),
+            }
+        }
+        2 => {
+            Message::RdispatchNack {
+                tag: tag,
+                contexts: contexts,
+            }
+        }
+        _ => panic!("invalid Rdispatch status"),
+    }
+}
+
+fn decode_rreq(tag: u32, buf: Vec<u8>) -> Message {
+    if buf.len() < 1 {
+        panic!("short Rreq");
+    }
+    let mut rdr = Cursor::new(buf);
+    let mut status = [0u8];
+    rdr.read_exact(&mut status).unwrap();
+    let mut rest: Vec<u8> = Vec::new();
+    rdr.read_to_end(&mut rest).unwrap();
+    match status[0] {
+        0 => {
+            Message::RreqOk {
+                tag: tag,
+                reply: rest,
+            }
+        }
+        1 => {
+            Message::RreqError {
+                tag: tag,
+                error: String::from_utf8(rest).unwrap(),
+            }
+        }
+        2 => Message::RreqNack { tag: tag },
+        _ => panic!("invalid Rreq status"),
+    }
+}
+
+fn decode_tdiscarded(buf: Vec<u8>) -> Message {
+    if buf.len() < 3 {
+        panic!("short Tdiscarded message");
+    }
+    let mut rdr = Cursor::new(buf);
+    let mut bytes = [0; 3];
+    rdr.read_exact(&mut bytes).unwrap();
+    let which: u32 = (((bytes[0] & 0xff) as u32) << 16) | (((bytes[1] & 0xff) as u32) << 8) |
+                     (bytes[2] & 0xff) as u32;
+    let mut why: Vec<u8> = Vec::new();
+    rdr.read_to_end(&mut why).unwrap();
+    Message::Tdiscarded {
+        which: which,
+        why: String::from_utf8(why).unwrap(),
+    }
+}
+
+fn decode_tlease(buf: Vec<u8>) -> Message {
+    if buf.len() < 9 {
+        panic!("short Tlease message");
+    }
+    let mut rdr = Cursor::new(buf);
+    let mut unit = [0u8];
+    rdr.read_exact(&mut unit).unwrap();
+    let how_much = rdr.read_u64::<BigEndian>().unwrap();
+    Message::Tlease {
+        unit: unit[0],
+        how_long: how_much,
+    }
+}
