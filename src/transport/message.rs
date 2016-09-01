@@ -43,15 +43,15 @@ mod tags {
     pub const MAX_TAG: u32 = (1 << 23) - 1;
     pub const TAG_MSB: u32 = (1 << 23);
 
-    fn extract_type(header: u32) -> i8 {
+    pub fn extract_type(header: u32) -> i8 {
         (header >> 24 & 0xff) as i8
     }
 
-    fn extract_tag(header: u32) -> u32 {
+    pub fn extract_tag(header: u32) -> u32 {
         header & 0x00ffffff
     }
 
-    fn is_fragment(tag: u32) -> bool {
+    pub fn is_fragment(tag: u32) -> bool {
         (tag >> 23 & 1) == 1
     }
 
@@ -367,27 +367,6 @@ impl Message {
     }
 }
 
-fn encode(msg: Message) -> Vec<u8> {
-    match msg {
-        m @ Message::PreEncodedTping => m.buf(),
-        m => {
-            let tag = m.tag();
-            let typ = m.typ();
-            if tag < tags::MARKER_TAG || (tag & !tags::TAG_MSB) > tags::MAX_TAG {
-                panic!("invalid tag number {}", tag);
-            }
-
-            let mut head = vec![typ as u8,
-                                (tag >> 16 & 0xff) as u8,
-                                (tag >> 8 & 0xff) as u8,
-                                (tag & 0xff) as u8];
-
-            head.extend_from_slice(&m.buf()[..]);
-            head
-        }
-    }
-}
-
 fn decode_treq(tag: u32, buf: Vec<u8>) -> Message {
     if buf.len() < 1 {
         panic!("short Treq");
@@ -557,5 +536,82 @@ fn decode_tlease(buf: Vec<u8>) -> Message {
     Message::Tlease {
         unit: unit[0],
         how_long: how_much,
+    }
+}
+
+fn decode(buf: Vec<u8>) -> Message {
+    if buf.len() < 4 {
+        panic!("short message");
+    }
+    let mut rdr = Cursor::new(buf);
+    let head = rdr.read_u32::<BigEndian>().unwrap();
+    let mut rest: Vec<u8> = Vec::new();
+    rdr.read_to_end(&mut rest).unwrap();
+    let typ = tags::extract_type(head);
+    let tag = tags::extract_tag(head);
+    if tags::is_fragment(tag) {
+        return Message::Fragment {
+            typ: typ,
+            tag: tag,
+            buf: rest,
+        };
+    }
+    match typ {
+        types::TINIT => {
+            let (version, ctx) = init::decode(rest);
+            Message::Tinit {
+                tag: tag,
+                version: version,
+                headers: ctx,
+            }
+        }
+        types::RINIT => {
+            let (version, ctx) = init::decode(rest);
+            Message::Rinit {
+                tag: tag,
+                version: version,
+                headers: ctx,
+            }
+        }
+        types::TREQ => decode_treq(tag, rest),
+        types::RREQ => decode_rreq(tag, rest),
+        types::TDISPATCH => decode_tdispatch(tag, rest),
+        types::RDISPATCH => decode_rdispatch(tag, rest),
+        types::TDRAIN => Message::Tdrain { tag: tag },
+        types::RDRAIN => Message::Rdrain { tag: tag },
+        types::TPING => Message::Tping { tag: tag },
+        types::RPING => Message::Rping { tag: tag },
+        types::RERR | types::BAD_RERR => {
+            Message::Rerr {
+                tag: tag,
+                error: String::from_utf8(rest).unwrap(),
+            }
+        }
+        types::RDISCARDED => Message::Rdiscarded { tag: tag },
+        types::TDISCARDED |
+        types::BAD_TDISCARDED => decode_tdiscarded(rest),
+        types::TLEASE => decode_tlease(rest),
+        _ => panic!("unknown message type: {} [tag={}]", typ, tag),
+    }
+}
+
+fn encode(msg: Message) -> Vec<u8> {
+    match msg {
+        m @ Message::PreEncodedTping => m.buf(),
+        m => {
+            let tag = m.tag();
+            let typ = m.typ();
+            if tag < tags::MARKER_TAG || (tag & !tags::TAG_MSB) > tags::MAX_TAG {
+                panic!("invalid tag number {}", tag);
+            }
+
+            let mut head = vec![typ as u8,
+                                (tag >> 16 & 0xff) as u8,
+                                (tag >> 8 & 0xff) as u8,
+                                (tag & 0xff) as u8];
+
+            head.extend_from_slice(&m.buf()[..]);
+            head
+        }
     }
 }
