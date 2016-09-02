@@ -5,3 +5,4 @@ authors = ["Yuanchao Sun <yuanchao.sun@gmail.com>"]
 
 [dependencies]
 byteorder = "0.5.3"
+futures = { git = "https://github.com/alexcrichton/futures-rs" }
