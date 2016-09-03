@@ -20,7 +20,7 @@
 mod header {
     use byteorder::{ReadBytesExt, WriteBytesExt, BigEndian};
     use std::io::Cursor;
-    // val KeyBuf: Buf = Buf.Utf8("mux-framer")
+    const KEY_BUF: &'static [u8] = b"mux-framer";
 
     /**
      * Returns a header value with the given frame `size` encoded.
