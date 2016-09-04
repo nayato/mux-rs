@@ -6,3 +6,5 @@ authors = ["Yuanchao Sun <yuanchao.sun@gmail.com>"]
 [dependencies]
 byteorder = "0.5.3"
 futures = { git = "https://github.com/alexcrichton/futures-rs" }
+log = "0.3.6"
+tokio-proto = { git = "https://github.com/tokio-rs/tokio-proto" }

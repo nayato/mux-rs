@@ -1,4 +1,8 @@
 extern crate byteorder;
+extern crate tokio_proto as proto;
+
+#[macro_use]
+extern crate log;
 
 mod transport;
 
